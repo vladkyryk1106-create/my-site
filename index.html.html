@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>Dino Game ULTRA+</title>
+
+<style>
+body {
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background: linear-gradient(#dff3ff, #ffffff);
+    font-family: Arial;
+}
+
+#gameContainer {
+    text-align: center;
+}
+
+canvas {
+    border: 2px solid #333;
+}
+
+#shop {
+    display: none;
+    background: white;
+    border: 2px solid black;
+    padding: 10px;
+    margin-top: 10px;
+    opacity: 0;
+    transform: scale(0.9);
+    transition: 0.3s;
+}
+
+#shop.active {
+    display: block;
+    opacity: 1;
+    transform: scale(1);
+}
+
+button {
+    margin: 5px;
+    padding: 8px 12px;
+    transition: 0.2s;
+}
+
+button:hover {
+    transform: scale(1.1);
+}
+</style>
+</head>
+
+<body>
+
+<div id="gameContainer">
+
+<div id="menu">
+    <h2>Dino Game 🦖</h2>
+    <button onclick="startGame()">Play</button><br>
+
+    <select id="level">
+        <option value="easy">Легкий</option>
+        <option value="medium">Середній</option>
+        <option value="hard">Складний</option>
+    </select>
+</div>
+
+<button onclick="toggleShop()">🛒 Магазин</button>
+<div id="coins"></div>
+
+<div id="shop">
+    <h3>Магазин</h3>
+
+    <h4>Скіни</h4>
+    <button onclick="buySkin('black',0)">Чорний</button>
+    <button onclick="buySkin('green',50)">Зелений</button>
+    <button onclick="buySkin('red',100)">Червоний</button>
+
+    <h4>Фони</h4>
+    <button onclick="buyBg('day',0)">День</button>
+    <button onclick="buyBg('desert',80)">Пустеля</button>
+    <button onclick="buyBg('forest',120)">Ліс</button>
+
+    <hr>
+
+    <input id="promoInput" placeholder="код">
+    <button onclick="usePromo()">OK</button>
+    <div id="promoMsg"></div>
+</div>
+
+<canvas id="game" width="800" height="200" style="display:none;"></canvas>
+<div id="score"></div>
+
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let speedMap = { easy: 4, medium: 6, hard: 9 };
+let speed, baseSpeed;
+
+let dino, obstacles;
+let frame, score, gameOver;
+
+let running = false;
+
+/* 💾 */
+let coins = parseInt(localStorage.getItem("coins")) || 0;
+let currentBg = localStorage.getItem("bg") || "day";
+let currentSkin = localStorage.getItem("skin") || "black";
+let ownedBg = JSON.parse(localStorage.getItem("ownedBg")) || ["day"];
+let ownedSkins = JSON.parse(localStorage.getItem("ownedSkins")) || ["black"];
+let usedPromos = JSON.parse(localStorage.getItem("usedPromos")) || [];
+
+document.getElementById("coins").innerText = "Coins: " + coins;
+
+/* 🛒 */
+function toggleShop() {
+    document.getElementById("shop").classList.toggle("active");
+}
+
+function buySkin(skin, price) {
+    if (!ownedSkins.includes(skin)) {
+        if (coins < price) return;
+        coins -= price;
+        ownedSkins.push(skin);
+    }
+    currentSkin = skin;
+    save();
+}
+
+function buyBg(bg, price) {
+    if (!ownedBg.includes(bg)) {
+        if (coins < price) return;
+        coins -= price;
+        ownedBg.push(bg);
+    }
+    currentBg = bg;
+    save();
+}
+
+function save() {
+    localStorage.setItem("coins", coins);
+    localStorage.setItem("bg", currentBg);
+    localStorage.setItem("skin", currentSkin);
+    localStorage.setItem("ownedBg", JSON.stringify(ownedBg));
+    localStorage.setItem("ownedSkins", JSON.stringify(ownedSkins));
+    document.getElementById("coins").innerText = "Coins: " + coins;
+}
+
+/* 🎁 */
+function usePromo() {
+    let code = document.getElementById("promoInput").value;
+
+    if (usedPromos.includes(code)) return;
+
+    if (code === "7В") coins += 100;
+    if (code === "Nasklio") coins += 9999;
+
+    usedPromos.push(code);
+    localStorage.setItem("usedPromos", JSON.stringify(usedPromos));
+    save();
+}
+
+/* 🎮 */
+function startGame() {
+    baseSpeed = speedMap[document.getElementById("level").value];
+    speed = baseSpeed;
+
+    document.getElementById("menu").style.display = "none";
+    canvas.style.display = "block";
+
+    dino = {
+        x: 60,
+        y: 150,
+        dy: 0,
+        gravity: 0.6,
+        jump: -11,
+        grounded: true,
+        duck: false
+    };
+
+    obstacles = [];
+    frame = 0;
+    score = 0;
+    gameOver = false;
+
+    loop();
+}
+
+/* керування */
+document.addEventListener("keydown", (e) => {
+    if (!dino) return;
+
+    if (e.key === "ArrowUp" && dino.grounded) {
+        dino.dy = dino.jump;
+        dino.grounded = false;
+    }
+
+    if (e.key === "ArrowDown") dino.duck = true;
+
+    if (e.key === "Shift") {
+        running = true;
+        speed = baseSpeed + 3;
+    }
+
+    if (gameOver) location.reload();
+});
+
+document.addEventListener("keyup", (e) => {
+    if (e.key === "ArrowDown") dino.duck = false;
+
+    if (e.key === "Shift") {
+        running = false;
+        speed = baseSpeed;
+    }
+});
+
+/* obstacle */
+function spawnObstacle() {
+    obstacles.push({ x:800, y:160, w:20, h:40 });
+}
+
+/* update */
+function update() {
+    if (gameOver) return;
+
+    frame++;
+
+    dino.y += dino.dy;
+    dino.dy += dino.gravity;
+
+    if (dino.y >= 150) {
+        dino.y = 150;
+        dino.dy = 0;
+        dino.grounded = true;
+    }
+
+    if (frame % 90 === 0) spawnObstacle();
+
+    obstacles.forEach((o,i)=>{
+        o.x -= speed;
+
+        let h = dino.duck ? 15 : 30;
+        let y = dino.duck ? dino.y + 15 : dino.y; // ✅ ФІКС
+
+        if (
+            60 < o.x+o.w &&
+            90 > o.x &&
+            y < o.y+o.h &&
+            y+h > o.y
+        ) {
+            gameOver = true;
+            coins += Math.floor(score/10);
+            save();
+        }
+
+        if (o.x < -50) obstacles.splice(i,1);
+    });
+
+    score++;
+}
+
+/* 🎨 ФОНИ */
+function drawBg() {
+    if (currentBg === "day") {
+        ctx.fillStyle = "#dff3ff";
+        ctx.fillRect(0,0,800,200);
+    }
+
+    if (currentBg === "desert") {
+        ctx.fillStyle = "#f4d29c";
+        ctx.fillRect(0,0,800,200);
+
+        ctx.fillStyle = "#e0b878";
+        ctx.fillRect(0,160,800,40);
+    }
+
+    if (currentBg === "forest") {
+        ctx.fillStyle = "#87c77b";
+        ctx.fillRect(0,0,800,200);
+
+        // дерева
+        for (let i=0;i<800;i+=100){
+            ctx.fillStyle = "#8b5a2b";
+            ctx.fillRect(i,120,10,60);
+
+            ctx.fillStyle = "#2e8b57";
+            ctx.beginPath();
+            ctx.arc(i+5,110,25,0,Math.PI*2);
+            ctx.fill();
+        }
+    }
+}
+
+/* 🦖 */
+function drawDino() {
+    ctx.fillStyle = currentSkin;
+    ctx.fillRect(60, dino.duck ? dino.y+15 : dino.y, 30, dino.duck ? 15 : 30);
+}
+
+/* draw */
+function draw() {
+    drawBg();
+
+    ctx.fillStyle="#000";
+    ctx.fillRect(0,180,800,2);
+
+    drawDino();
+
+    obstacles.forEach(o=>{
+        ctx.fillRect(o.x,o.y,o.w,o.h);
+    });
+
+    if (gameOver){
+        ctx.fillText("GAME OVER",300,100);
+    }
+}
+
+/* loop */
+function loop(){
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+</script>
+
+</body>
+</html>
